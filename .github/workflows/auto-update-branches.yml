@@ -1,0 +1,14 @@
+name: Auto-update PR branches
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  update:
+    uses: cheunjm/.github/.github/workflows/auto-update-branches.yml@main
+    secrets: inherit
