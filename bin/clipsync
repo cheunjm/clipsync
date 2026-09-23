@@ -1,0 +1,44 @@
+#!/bin/bash
+# clipsync: poll the local macOS clipboard for a new image and push it into
+# a remote host's native clipboard over plain SSH (scp + osascript).
+#
+# Intended to run on a short interval via a LaunchAgent (see install.sh),
+# so that pasting an image on your local machine makes it available to
+# paste (e.g. Ctrl+V into a remote Claude Code session) on the remote host,
+# without any token/daemon pairing — just your existing SSH key trust.
+#
+# Config (env vars):
+#   CLIPSYNC_REMOTE_HOST     required. SSH host/alias to push images to.
+#   CLIPSYNC_REMOTE_TMP_DIR  optional. Remote scratch dir. Default: /tmp
+#   CLIPSYNC_CACHE_DIR       optional. Local state dir. Default: ~/.cache/clipsync
+#   CLIPSYNC_SSH_OPTS        optional. Extra ssh/scp options, space-separated.
+set -euo pipefail
+
+: "${CLIPSYNC_REMOTE_HOST:?CLIPSYNC_REMOTE_HOST is required (SSH host/alias to sync to)}"
+REMOTE_TMP_DIR="${CLIPSYNC_REMOTE_TMP_DIR:-/tmp}"
+CACHE_DIR="${CLIPSYNC_CACHE_DIR:-$HOME/.cache/clipsync}"
+LAST_HASH_FILE="$CACHE_DIR/last-hash.txt"
+# shellcheck disable=SC2206
+SSH_OPTS=(-o ConnectTimeout=3 -o BatchMode=yes ${CLIPSYNC_SSH_OPTS:-})
+
+mkdir -p "$CACHE_DIR"
+
+TMPFILE=$(mktemp "/tmp/clipsync-XXXX.png")
+trap 'rm -f "$TMPFILE"' EXIT
+
+command -v pngpaste >/dev/null 2>&1 || { echo "clipsync: pngpaste not found (brew install pngpaste)" >&2; exit 1; }
+
+pngpaste "$TMPFILE" >/dev/null 2>&1 || exit 0
+[ -s "$TMPFILE" ] || exit 0
+
+HASH=$(md5 -q "$TMPFILE")
+LAST_HASH=$(cat "$LAST_HASH_FILE" 2>/dev/null || true)
+[ "$HASH" = "$LAST_HASH" ] && exit 0
+
+REMOTE_TMP="${REMOTE_TMP_DIR%/}/clipsync-$(date +%s)-$$.png"
+scp -q "${SSH_OPTS[@]}" "$TMPFILE" "${CLIPSYNC_REMOTE_HOST}:${REMOTE_TMP}" 2>/dev/null || exit 0
+
+# shellcheck disable=SC2029  # intentional: REMOTE_TMP expands locally before the remote command string is built
+ssh "${SSH_OPTS[@]}" "$CLIPSYNC_REMOTE_HOST" \
+  "osascript -e 'set the clipboard to (read (POSIX file \"${REMOTE_TMP}\") as «class PNGf»)' && rm -f '${REMOTE_TMP}'" \
+  >/dev/null 2>&1 && echo "$HASH" > "$LAST_HASH_FILE"

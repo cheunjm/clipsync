@@ -1,0 +1,16 @@
+name: Auto-resolve PR conflicts
+
+on:
+  workflow_run:
+    workflows: ["Auto-update PR branches"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+  contents: read
+  issues: write
+
+jobs:
+  resolve:
+    uses: cheunjm/.github/.github/workflows/auto-resolve-conflicts.yml@main
+    secrets: inherit
