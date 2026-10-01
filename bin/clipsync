@@ -31,6 +31,20 @@ command -v pngpaste >/dev/null 2>&1 || { echo "clipsync: pngpaste not found (bre
 pngpaste "$TMPFILE" >/dev/null 2>&1 || exit 0
 [ -s "$TMPFILE" ] || exit 0
 
+# pngpaste can hand back a degenerate placeholder image instead of failing
+# outright — observed in practice as a complete, valid, 1x1-pixel PNG
+# (~69-70 bytes). [ -s ] only checks "non-empty", so that placeholder
+# sails through and overwrites the remote clipboard's good content with
+# junk. A real screenshot is never this small, so require sane minimum
+# dimensions on both axes before going any further.
+MIN_DIMENSION=16
+DIMENSIONS="$(sips -g pixelWidth -g pixelHeight "$TMPFILE" 2>/dev/null)"
+WIDTH="$(awk '/pixelWidth:/ {print $2}' <<<"$DIMENSIONS")"
+HEIGHT="$(awk '/pixelHeight:/ {print $2}' <<<"$DIMENSIONS")"
+case "$WIDTH" in ''|*[!0-9]*) exit 0 ;; esac
+case "$HEIGHT" in ''|*[!0-9]*) exit 0 ;; esac
+[ "$WIDTH" -ge "$MIN_DIMENSION" ] && [ "$HEIGHT" -ge "$MIN_DIMENSION" ] || exit 0
+
 HASH=$(md5 -q "$TMPFILE")
 LAST_HASH=$(cat "$LAST_HASH_FILE" 2>/dev/null || true)
 [ "$HASH" = "$LAST_HASH" ] && exit 0
